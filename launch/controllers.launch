@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="ethercat_config" default="$(find esa_servo)/config/ethercat.yaml"/>
+  <arg name="debug" default="false"/>
+
+  <env if="$(arg debug)"
+    name="ROSCONSOLE_CONFIG_FILE" value="$(find esa_servo)/rosconsole.conf"/>
+
+  <rosparam command="load" file="$(find delta_servo)/config/hardware.yaml" />
+  <rosparam command="load" file="$(find delta_servo)/config/controllers.yaml" />
+
+  <!-- -->
+  <node name="delta_servo" launch-prefix="ethercat_grant" pkg="delta_servo" type="delta_servo" output="log">
+    <rosparam ns="ethercat" file="$(arg ethercat_config)"/>
+  </node>
+
+  <!-- -->
+  <node ns="ewdl_driver" name="controller_spawner" pkg="controller_manager" type="spawner" output="screen"
+    args="/rail/controller/state
+          /rail/controller/rail_controller" />
+
+</launch>

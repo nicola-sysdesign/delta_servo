@@ -1,0 +1,18 @@
+#####################
+## EtherCAT Master ##
+#####################
+
+ifname: enp7s0f1
+  # EtherCAT Master interface
+slaves:
+  - device_name: "ASDA-A2 Servo Drive"
+    # Profile Position
+    position_window: 10000              #
+    position_window_time: 10000         #
+    # Following Error Window
+    following_error_window: 10000       #
+    # Position Interpolation
+    interpolation_sub_mode: 0           #
+    interpolation_time_period: 2        #
+    # QuickStop
+    quickstop_deceleration: 3000000     #

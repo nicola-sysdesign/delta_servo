@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>delta_servo</name>
+  <version>0.0.0</version>
+  <description>
+    ROS package to control Delta Servo ASDA-A2 series
+  </description>
+  <license>TODO</license>
+
+  <maintainer email="nicola@sysdesign.it">Nicola Conti</maintainer>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <!-- -->
+  <depend>roscpp</depend>
+  <depend>std_srvs</depend>
+  <depend>controller_manager</depend>
+  <depend>hardware_interface</depend>
+  <depend>transmission_interface</depend>
+  <depend>industrial_msgs</depend>
+  <depend>xmlrpcpp</depend>
+  <depend>soem</depend>
+  <!-- -->
+  <depend>boost</depend>
+
+</package>

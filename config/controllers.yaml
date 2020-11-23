@@ -1,0 +1,23 @@
+
+#################
+## Controllers ##
+#################
+rail:
+  controller:
+    state:
+      type: joint_state_controller/JointStateController
+      publish_rate: 50
+    position:
+      rail_joint:
+        type: position_controllers/JointPositionController
+        joint: rail_joint
+    rail_controller:
+      type: position_controllers/JointTrajectoryController
+      action_monitor_rate: 50
+      joints:
+        - rail_joint
+      constraints:
+        goal_time: 1.0
+        rail_joint: { goal: 0.01, trajectory: 0.02 }
+        stopped_velocity_tolerance: 0.05
+      stop_trajectory_duration: 1.0

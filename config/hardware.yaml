@@ -1,0 +1,11 @@
+
+########################
+## Hardware Interface ##
+########################
+rail:
+  hardware_interface:
+    loop_hz: 500
+    joints:
+      - rail_joint
+    actuators:
+      - rail_motor
