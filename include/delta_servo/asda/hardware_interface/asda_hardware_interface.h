@@ -2,6 +2,11 @@
 #define DELTA_ASDA_HARDWARE_INTERFACE_H
 #include <string>
 #include <vector>
+// UNIX
+#include <unistd.h>
+#include <pthread.h>
+#include <sched.h>
+#include <errno.h>
 // roscpp
 #include <ros/ros.h>
 #include <ros/console.h>
@@ -20,6 +25,7 @@
 #include <XmlRpcException.h>
 // delta_servo
 #include "delta_servo/asda/ethercat/master.h"
+#include "delta_servo/asda/ethercat/time.h"
 
 #define POSITION_STEP_FACTOR  100000.0
 #define VELOCITY_STEP_FACTOR  100000.0
@@ -27,14 +33,14 @@
 
 namespace delta { namespace asda {
 
+void* control_loop(void* arg);
+
 class ServoHW : public hardware_interface::RobotHW {
 private:
 
-  delta::asda::ethercat::Master ec_master;
-
-  bool init_ethercat(const std::string &ifname, const std::vector<std::string> &slaves)
+  bool init_ethercat(unsigned long cycletime, const std::string &ifname, const std::vector<std::string> &slaves)
   {
-    ec_master = delta::asda::ethercat::Master(ifname, slaves);
+    ec_master = delta::asda::ethercat::Master(cycletime, ifname, slaves);
 
     if (ec_master.init())
     {
@@ -90,9 +96,9 @@ protected:
 
         const uint16 slave_idx = 1 + i;
         ROS_DEBUG("EtherCAT Slave[%d] Following Error Window: %u", slave_idx, following_error_window);
-        ROS_DEBUG("EtherCAT Slave[%d] QuickStop Deceleration: %u", slave_idx, quickstop_deceleration);
         ROS_DEBUG("EtherCAT Slave[%d] Position Offset: %u", slave_idx, position_offset);
         ROS_DEBUG("EtherCAT Slave[%d] Position Factor: %u : %u", slave_idx, position_factor[0], position_factor[1]);
+        ROS_DEBUG("EtherCAT Slave[%d] QuickStop Deceleration: %u", slave_idx, quickstop_deceleration);
 
         ec_master.config_position_interpolation(slave_idx, delta::asda::ethercat::interpolation_sub_mode_t::LINEAR_INTERPOLATION, interpolation_time_period);
         ec_master.set_following_error_window(slave_idx, following_error_window);
@@ -115,8 +121,10 @@ protected:
 public:
 
   double loop_hz;
+  delta::asda::ethercat::Master ec_master;
 
   std::shared_ptr<controller_manager::ControllerManager> controller_manager;
+  bool reset_controllers = true;
 
   // Transmission Interface
   transmission_interface::ActuatorToJointStateInterface* act_to_jnt_state_interface;
@@ -141,10 +149,10 @@ public:
     bool following_error;
   } status;
 
-  bool reset_controllers = true;
 
-
-  ServoHW(ros::NodeHandle &node) : node(node), controller_manager(new controller_manager::ControllerManager(this, node)) { }
+  ServoHW(ros::NodeHandle &node) :
+    node(node),
+    controller_manager(new controller_manager::ControllerManager(this, node)) { }
 
 
   bool init(double loop_hz, const std::vector<std::string> &joints, const std::vector<std::string> &actuators)
@@ -154,6 +162,9 @@ public:
     this->actuators = actuators;
 
     // EtherCAT
+    unsigned long cycletime;
+    cycletime = (1.0 / loop_hz) * 1000000000;
+
     std::string ifname;
     if (!node.getParam("ethercat/ifname", ifname))
     {
@@ -186,7 +197,7 @@ public:
       }
     }
 
-    if (!init_ethercat(ifname, slaves))
+    if (!init_ethercat(cycletime, ifname, slaves))
     {
       ROS_ERROR("Failed to initialize EtherCAT master");
       close();
@@ -230,15 +241,70 @@ public:
     return true;
   }
 
+
   bool start()
   {
-    if (ec_master.start())
+    if (!ec_master.start())
     {
-      reset_controllers = true;
-      return true;
+      return false;
     }
-    else
+
+    pthread_t pthread;
+    pthread_attr_t pthread_attr;
+
+    errno = pthread_attr_init(&pthread_attr);
+    if (errno != 0)
     {
+      ROS_FATAL("pthread_attr_init");
+      return false;
+    }
+
+    cpu_set_t cpu_set;
+    CPU_ZERO(&cpu_set);
+    CPU_SET(1, &cpu_set);
+    errno = pthread_attr_setaffinity_np(&pthread_attr, sizeof(cpu_set), &cpu_set);
+    if (errno != 0)
+    {
+      ROS_FATAL("pthread_attr_setaffinity_np");
+      return 1;
+    }
+
+    errno = pthread_attr_setinheritsched(&pthread_attr, PTHREAD_EXPLICIT_SCHED);
+    if (errno != 0)
+    {
+      ROS_FATAL("pthread_attr_setschedpolicy");
+      return false;
+    }
+
+    errno = pthread_attr_setschedpolicy(&pthread_attr, SCHED_FIFO);
+    if (errno != 0)
+    {
+      ROS_FATAL("pthread_attr_setschedpolicy");
+      return false;
+    }
+
+    sched_param sched_param
+    {
+      .sched_priority = 80
+    };
+    errno = pthread_attr_setschedparam(&pthread_attr, &sched_param);
+    if (errno != 0)
+    {
+      ROS_FATAL("pthread_attr_setschedparam");
+      return false;
+    }
+
+    errno = pthread_create(&pthread, &pthread_attr, &control_loop, this);
+    if (errno != 0)
+    {
+      ROS_FATAL("pthread_create");
+      return false;
+    }
+
+    errno = pthread_attr_destroy(&pthread_attr);
+    if (errno != 0)
+    {
+      ROS_FATAL("pthread_attr_destroy");
       return false;
     }
   }
@@ -351,6 +417,49 @@ public:
   }
 
 };
+
+
+inline void* control_loop(void* arg)
+{
+  delta::asda::ServoHW* servo_hw = (delta::asda::ServoHW*)arg;
+  servo_hw->reset_controllers = true;
+
+  struct timespec t, t_1;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+
+  while (ros::ok())
+  {
+    delta::asda::ethercat::add_timespec(&t, servo_hw->ec_master.t_cycle + servo_hw->ec_master.t_off);
+
+    struct timespec t_left;
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &t, &t_left);
+
+    struct timespec t_period;
+    delta::asda::ethercat::diff_timespec(t, t_1, &t_period);
+
+    if (delta::asda::ethercat::to_nsec(t_period) < (servo_hw->ec_master.t_cycle - 100000) || (servo_hw->ec_master.t_cycle + 100000) < delta::asda::ethercat::to_nsec(t_period))
+    {
+      ROS_WARN("EtherCAT Master period: %lu [ns]", delta::asda::ethercat::to_nsec(t_period));
+    }
+
+    const ros::Time now = ros::Time::now();
+    const ros::Duration period(delta::asda::ethercat::to_sec(t_period));
+
+    servo_hw->read(now, period);
+    servo_hw->act_to_jnt_state_interface->propagate();
+
+    servo_hw->controller_manager->update(now, period, servo_hw->reset_controllers);
+    servo_hw->reset_controllers = false;
+
+    servo_hw->jnt_to_act_pos_interface->propagate();
+    // servo_hw->jnt_to_act_vel_interface->propagate();
+    // servo_hw->jnt_to_act_eff_interface->propagate();
+    servo_hw->write(now, period);
+
+    t_1 = t;
+  }
+}
+
 
 } }  // namespace
 #endif

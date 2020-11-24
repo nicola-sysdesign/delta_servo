@@ -118,6 +118,7 @@ catkin_package(
     industrial_msgs
     xmlrpcpp
     soem
+    ethercat_grant
   DEPENDS Boost
 )
 

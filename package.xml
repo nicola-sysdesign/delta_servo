@@ -21,5 +21,7 @@
   <depend>soem</depend>
   <!-- -->
   <depend>boost</depend>
+  <!-- -->
+  <exec_depend>ethercat_grant</exec_depend>
 
 </package>

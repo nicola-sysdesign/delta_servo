@@ -3,11 +3,6 @@
 #include <vector>
 #include <chrono>
 #include <thread>
-// UNIX
-#include <unistd.h>
-#include <pthread.h>
-#include <sched.h>
-#include <errno.h>
 // roscpp
 #include <ros/ros.h>
 #include <ros/console.h>
@@ -22,37 +17,6 @@
 #include <industrial_msgs/RobotStatus.h>
 // delta_servo
 #include "delta_servo/asda/hardware_interface/asda_hardware_interface.h"
-
-
-void* control_loop(void* arg)
-{
-  delta::asda::ServoHW* servo_hw = (delta::asda::ServoHW*)arg;
-
-  ros::SteadyTime prev_time = ros::SteadyTime::now();
-  ros::Rate rate(servo_hw->loop_hz);
-  while (ros::ok())
-  {
-    rate.sleep();
-    const ros::Time now = ros::Time::now();
-
-    const ros::SteadyTime curr_time = ros::SteadyTime::now();
-    const ros::Duration period((curr_time - prev_time).toSec());
-    // ROS_DEBUG("period: %lu us", period.toNSec() / 1000U);
-
-    servo_hw->read(now, period);
-    servo_hw->act_to_jnt_state_interface->propagate();
-
-    servo_hw->controller_manager->update(now, period, servo_hw->reset_controllers);
-    servo_hw->reset_controllers = false;
-
-    servo_hw->jnt_to_act_pos_interface->propagate();
-    // servo_hw->jnt_to_act_vel_interface->propagate();
-    // servo_hw->jnt_to_act_eff_interface->propagate();
-    servo_hw->write(now, period);
-
-    prev_time = curr_time;
-  }
-}
 
 
 int main(int argc, char* argv[])
@@ -148,66 +112,6 @@ int main(int argc, char* argv[])
   else
   {
     ROS_FATAL("Failed to start Hardware Interface");
-    return 1;
-  }
-
-  // POSIX Thread
-  pthread_t pthread;
-  pthread_attr_t pthread_attr;
-
-  errno = pthread_attr_init(&pthread_attr);
-  if (errno != 0)
-  {
-    perror("pthread_attr_init");
-    return 1;
-  }
-
-  cpu_set_t cpu_set;
-  CPU_ZERO(&cpu_set);
-  CPU_SET(1, &cpu_set);
-  errno = pthread_attr_setaffinity_np(&pthread_attr, sizeof(cpu_set), &cpu_set);
-  if (errno != 0)
-  {
-    perror("pthread_attr_setaffinity_np");
-    return 1;
-  }
-
-  errno = pthread_attr_setinheritsched(&pthread_attr, PTHREAD_EXPLICIT_SCHED);
-  if (errno != 0)
-  {
-    perror("pthread_attr_setschedpolicy");
-    return 1;
-  }
-
-  errno = pthread_attr_setschedpolicy(&pthread_attr, SCHED_FIFO);
-  if (errno != 0)
-  {
-    perror("pthread_attr_setschedpolicy");
-    return 1;
-  }
-
-  sched_param sched_param
-  {
-    .sched_priority = 80
-  };
-  errno = pthread_attr_setschedparam(&pthread_attr, &sched_param);
-  if (errno != 0)
-  {
-    perror("pthread_attr_setschedparam");
-    return 1;
-  }
-
-  errno = pthread_create(&pthread, &pthread_attr, &control_loop, &servo_hw);
-  if (errno != 0)
-  {
-    perror("pthread_create");
-    return 1;
-  }
-
-  errno = pthread_attr_destroy(&pthread_attr);
-  if (errno != 0)
-  {
-    perror("pthread_attr_destroy");
     return 1;
   }
 

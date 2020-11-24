@@ -62,15 +62,57 @@ private:
     return true;
   }
 
-public:
+  uint32 prev_DCtime32 = 0;
+  uint32 curr_DCtime32 = 0;
+  uint32 diff_DCtime32 = 0;
+  uint64 DCtime = 0;
+
+  void ec_sync(uint64 ec_DCtime, uint32 cycletime, int32 *t_off)
+  {
+    curr_DCtime32 = (uint32)(0xffffffff & ec_DCtime);
+
+    if (curr_DCtime32 > prev_DCtime32)
+    {
+      diff_DCtime32 = curr_DCtime32 - prev_DCtime32;
+    }
+    else
+    {
+      diff_DCtime32 = (0xffffffff - prev_DCtime32) + curr_DCtime32;
+    }
+
+    prev_DCtime32 = curr_DCtime32;
+
+    DCtime += diff_DCtime32;
+    pi_sync(DCtime, cycletime, t_off);
+  }
+
+
+  void pi_sync(uint64 t_ref, uint64 cycletime, int32 *t_off)
+  {
+    static int32 integral = 0;
+    int32 delta = (t_ref - (cycletime / 2)) % cycletime;
+
+    if (delta > (cycletime / 2))
+    {
+      delta = delta - cycletime;
+    }
+    if (delta > 0) integral++;
+    if (delta < 0) integral--;
+
+    *t_off = -(delta / 100) - (integral / 20);
+  }
+
+public:  
+  unsigned long t_cycle; long t_off = 0;
+
   int wkc = 0;
   delta::asda::ethercat::pdo::RxPDO2 rx_pdo[10];
   delta::asda::ethercat::pdo::TxPDO2 tx_pdo[10];
 
   Master() { }
 
-  Master(const std::string &ifname, const std::vector<std::string> &slaves) :
-    ifname(ifname), slaves(slaves) { }
+  Master(unsigned long cycletime, const std::string &ifname, const std::vector<std::string> &slaves) :
+    t_cycle(cycletime), ifname(ifname), slaves(slaves) { }
 
 
   bool init()
